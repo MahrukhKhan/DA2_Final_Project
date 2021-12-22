@@ -1,0 +1,402 @@
+---
+title: "Data Analysis 2 and Coding 1 Final_Project"
+author: "Mahrukh Khan"
+date: "12/21/2021"
+output: pdf_document
+---
+
+```{r, include=FALSE}
+library(tidyverse)
+library(haven)
+library(data.table)
+library(dplyr)
+library(fixest)
+library(huxtable)
+library(gridExtra)
+library(lspline)
+library(modelsummary)
+library(gridExtra)
+library(kableExtra)
+library(corrplot)
+```
+
+# Child Height and Toilets: Can Poor Sanitation Explain Stunting Across Punjab? 
+
+I decided to used the data provided by Multiple Indicator Cluster Survey (MICS) for the year 2017-18. The survey gave information regarding children, women and men well-being and households characteristics, ranging from health and education to domestic abuse and child protection to water and sanitation in Punjab. One of the data sets used included 42,408 children in Punjab, under the age of five, for whom the survey had been filled for information regarding their age, prenatal care, and anthropometry, etc. The other data set had household characteristics for 53,840 households in Punjab. The survey provided weights for each child as there could have been under representation due to limited number of surveys coming from a single locale, ensuring that the entire population was correctly represented. Even though stunting is a prevalent problem in Pakistan, I felt that few policies considered the extreme lack of sanitation facilities as a reason. My limited exposure of visiting the rural areas of Pakistan opened my eyes to the common practice of open defecation. It inspired me to explore whether stunting in children in Pakistan could have a relationship to the common practice of open defecation in their communities. 
+
+
+## Data Selection and Cleaning
+```{r, include=FALSE}
+
+# CREATING DATASET
+ch <- read.csv('https://raw.githubusercontent.com/MahrukhKhan/DA2_Final_Project/main/ch.csv')
+hh <- read.csv('https://raw.githubusercontent.com/MahrukhKhan/DA2_Final_Project/main/hh.csv')
+
+chhd <- merge(ch,hh, by=c('HH1','HH2'))
+
+
+# CREATING VARIABLES 
+#Open Defecation 
+chhd$open <- ifelse(chhd$WS11==95,1,0)
+
+##Total Number of Houses openly defecating in each PSU
+chhd <- chhd %>% 
+  group_by(psu) %>% 
+  mutate(open1=sum(open))
+## Total Number of houses in each psu
+chhd$psu <- as.numeric(chhd$psu)
+chhd <- chhd %>% 
+  group_by(psu) %>% 
+  mutate(houses=(count=n()))
+
+## Effect of Open Defecation on each house
+chhd <- chhd %>% 
+  group_by(psu) %>% 
+  mutate(opendef=open1/houses)
+
+#HAZ Score Cleaning
+
+chhd$HAZ2<- ifelse(chhd$HAZ2>=99,NA,chhd$HAZ2)
+chhd <- chhd[complete.cases(chhd$HAZ2),]
+
+#Age in Months (6-60months needed)
+
+chhd$cage<- ifelse(chhd$cage>60 | chhd$cage==0 |chhd$cage<6,NA,chhd$cage)
+chhd <- chhd[complete.cases(chhd$cage),]
+
+#Breastfeed
+chhd$breastfed <- ifelse(chhd$BD2==1,1,0)
+
+#Siblings under age of 5 #binary
+chhd <- chhd %>% group_by(HH1, HH2, AN5) %>% mutate(siblings=(count=n()))
+chhd$siblings <- chhd$siblings -1
+
+#Drinking Water 
+
+chhd$drinkingwater <- ifelse(chhd$WS7==2,1,0)
+
+#Handwash
+
+chhd$handwash <- ifelse(chhd$HW1==4,0,1)
+
+#Gender HH 1 male 0 female
+
+chhd$hhsex <- ifelse(chhd$hhsex==1,1,0)
+
+#Urban-1 Rural-0
+chhd$urban <- ifelse(chhd$HH6==1,1,0)
+
+#Diarrhea 
+chhd$diarrhea <- ifelse(chhd$CA1==1,1,0)
+
+# SELECTING DATA (16)
+
+chhd <- chhd %>% select(HH1, HH2, AN5, HAZ2 ,opendef, cage, breastfed, siblings, drinkingwater, handwash, hhsex, urban, diarrhea, windex5, melevel, helevel, chweight)
+
+#Taking out NAs
+chhd <- na.omit(chhd)
+```
+
+
+From the children data set, I selected variables representing height-for-age z score, age, mother’s education, etc. From the household data set I extracted data on open defecation, if the household is in urban or rural area,wealth index, etc. The height-for-age z-score (HAZ) is used as a measure of child height outcomes to determine the impact of open defecation in explaining the child height differential across Punjab. A child is considered stunted if the height of the child falls two standard deviations below the median of the reference population (which is set at a z-score of 0), as determined by WHO. This translates into a z-score of less than -2. As a data cleaning measure, observation for HAZ>6 or <-6 are excluded. Similarly, observations pertaining to children under 6 months are also dropped because stunting does not show significant presence in these early months. For the causal variable the PSU-level(primary sampling unit) open defecation is taken into account, in recognition of the negative externalities associated with an unsanitary environment for the entire community. Each household in a particular PSU is assigned the value representing the fraction of total households within that PSU that reported defecating openly. For the understanding of other variables please refer to Figure 1 in the appendix.
+
+## Data Descriptives
+
+```{r, include=FALSE}
+
+#DATA SUMMARY 
+
+P95 <- function(x){ quantile(x,.95,na.rm=T)}
+
+data_sum <-datasummary(HAZ2 + opendef  + cage + breastfed + siblings + drinkingwater + handwash +
+                         hhsex + urban + diarrhea + windex5 + melevel + helevel ~ Min + Max + P25 +
+                         Median + P75 + Mean + SD + P95 + N, data = chhd)
+
+# MAKING DISTRIBUTIONS FOR ALL VARIABLES
+source ('https://raw.githubusercontent.com/MahrukhKhan/DA2_Final_Project/main/code/MahrukhKhan_Theme.R')
+theme_set(theme_personal())
+
+binary_var <- chhd %>% ungroup() %>% 
+    select( breastfed, siblings, drinkingwater, handwash, hhsex, 
+           urban, diarrhea, windex5, melevel, helevel) %>% 
+            keep(is.numeric) %>% 
+            gather() %>% 
+            ggplot(aes(value)) +
+            facet_wrap(~key, scales = "free") +
+            geom_histogram(fill='mediumslateblue', binwidth = 0.5) 
+
+continuous_var <-chhd %>% ungroup() %>% 
+                select( HAZ2,cage, opendef) %>% 
+            keep(is.numeric) %>% 
+            gather() %>% 
+            ggplot(aes(value)) +
+            facet_wrap(~key, scales = "free") +
+            geom_histogram(fill='mediumslateblue') 
+
+
+```
+
+
+For data descriptive, distributions were made for the dependent, causal and conditioning variables. The variable, open defecation, was right skewed with mean value of 0.16 units. I decided not to manipulate the data to take logs, as the zero values in this data set are interpreted as no account of open defecation in the primary sampling unit. Hence, I decided to move forward with an imbalanced data set. Height for Age Z score followed a normal distribution with an average of -1.33 standard deviations which is below the median HAZ Score for children under the age of 5. The households on an average belong from a middle class wealth index. On average, both mother and household head, a high majority being men, have attained primary education. Figure 1 and Figure 2 from the appendix can be used for detail.
+
+The limitations of this data set was a high number of missing values for certain variables I wanted to explore such as dietary diversity score or immunization score for children which could have been significant for height for age z score. After creating those variables I realized the data set reduce to 1500 observations whilst excluding them shifted the data set to 18,500 observations with a better analysis of our variable of interest, open defecation.Hence I made the decision of not including them. The binary variables in the data set were labelled as 1 or 2 and sometimes 9 as 'I don't know'. I labelled 1 as being completely sure of knowing if the variable existed and 2 and 9 as zero. 
+
+## Patterns of Association
+
+```{r, include=FALSE}
+## PATTERNS OF ASSOCIATION
+
+
+#CAGE 
+
+g1 <- ggplot(data=chhd, aes(x=cage, y=HAZ2)) + 
+        geom_smooth(method='loess', col='mediumslateblue', formula = y ~ x,se = FALSE) +
+        annotate("text", x = 25, y = -1, label = "Knots at 20 and 26 months of age", size=3)
+        labs(x= 'Age in Months', y='HAZ Score') 
+
+#knot at 20, 26
+
+#Open Defecation
+
+g2 <- ggplot(data=chhd, aes(x=(opendef), y=HAZ2)) + 
+  geom_smooth(method='loess', col='mediumslateblue', formula = y ~ x,se = FALSE)+
+  annotate("text", x = 0.65, y = -1.2, label = "Knot at 65% of open defecation", size=3)
+  labs(x= 'Open Defecation', y='HAZ Score')
+
+#knot at 0.65
+## Household Head Education Level
+
+g3<-ggplot(data=chhd, aes(x=as.numeric(helevel), y=HAZ2)) + 
+    geom_smooth(method='loess', col='mediumslateblue', formula = y ~ x,se = FALSE) +
+    annotate("text", x = 1, y = -0.8, label = "Positive Linear Observation", size=3)
+    labs(x= 'Household Head Education Level', y='HAZ Score')
+
+##Mother Education Level
+
+
+g4<-ggplot(data=chhd, aes(x=as.numeric(melevel), y=HAZ2)) + 
+  geom_smooth(method='loess', col='mediumslateblue', formula = y ~ x,se = FALSE) +
+    annotate("text", x = 1, y = -0.6, label = "Positive Linear Observation", size=3)
+    labs(x= 'Mother Education Level', y='HAZ Score')
+
+
+## Wealth
+
+g5<-ggplot(data=chhd, aes(x=as.numeric(windex5), y=HAZ2)) + 
+    geom_smooth(method='loess', col='mediumslateblue', formula = y ~ x,se = FALSE) +
+    annotate("text", x = 2, y = -1, label = "Positive Linear Observation", size=3)
+    labs(x= 'Wealth Index', y='HAZ Score')
+
+
+```
+
+
+After studying the dataset thoroughly, I decided to conduct a non parametric regression with a loess curve between the dependent variable and the causal variable followed by the same regressions with some confounding variables. This would also help identify the functional form for the causal and confounding variables in the regression. I decided to conduct it for open defecation, age, mother and household head's education and wealth index.Figure 3 in the appendix shows the non parametric regressions.I decided to explore this by taking two approaches, First approach would be running a regression with anlspline at knot of 0.65 units of open defecation. Second approach would be adding a polynomial of a square term of open defecation in a regression. It would add to robustness. For the age variable, two knots were added, one being at 20 months and the other being at 26 months of age. Since education and wealth index will be treated as binary variables I simply checked it for association. 
+
+## Comparing Explanatory Variables
+
+```{r, include=FALSE}
+regx <- feols(opendef ~ as.factor(windex5), data=chhd)
+
+```
+
+A correlation plot, which can be seen in figure 4 in the appendix, aided in gaging the multicolinearity in the variables.It makes logical sense for some variables to have a certain degree of multicolinearity as economic indicators can be dependent on each other. 
+
+A highlight was that open defecation had a strong correlation with wealth quintiles. This uncovered a socioeconomic issue of there being lack of sanitation facilities in the lower quintiles. To further understand this, I regressed open defecation on the factors of wealth index, can be seen in figure 5 of appendix. They were all statistically significant at p value less than 0.001. This shows that the poorer households are suffering as a result of open defecation higher than households on the other end of the spectrum. It's a signal for the government to do target-based policy making for ensuring there are basic sanitation facilities in such communities. I have explained later on the topic of robustness. 
+
+
+## Main model and Reasoning
+
+```{r, include=FALSE}
+reg1 <-  feols(HAZ2 ~ handwash + breastfed + lspline(cage,c(20,26)) + drinkingwater + siblings +                    hhsex + diarrhea + urban + as.factor(melevel) +as.factor(helevel) +
+               as.factor(windex5),data=chhd, vcov='hetero',~ chweight)
+
+
+reg2 <-  feols(HAZ2 ~ lspline(opendef,0.65) + handwash  +breastfed + lspline(cage,c(20,26))+ 
+               drinkingwater + siblings + hhsex + diarrhea + urban + as.factor(melevel)+ 
+               as.factor(helevel) + as.factor(windex5), data = chhd, vcov='hetero',  ~ chweight)
+
+
+reg3 <-  feols(HAZ2 ~ opendef + lspline(cage,c(20,26)) + handwash + breastfed + siblings +
+               drinkingwater + hhsex + urban + diarrhea + as.factor(melevel) + 
+               as.factor(helevel)+as.factor(windex5), data = chhd, vcov='hetero', ~ chweight)
+
+#Creating open defecation square variable
+chhd$opensq <- chhd$opendef*chhd$opendef
+
+reg4 <-  feols(HAZ2 ~ opendef + opensq + lspline(cage,c(20,26))+ handwash + breastfed + siblings +
+                 drinkingwater + hhsex + urban + diarrhea + as.factor(melevel) +
+                 as.factor(helevel)+as.factor(windex5), data = chhd, vcov='hetero', ~ chweight)
+```
+
+My preferred model is as follows:
+
+$HAZ2$ = $\beta_{0}$ + $\beta_{1}$ $\times$$opendef_{(opendef < 0.65)}$ + $\beta_{3}$ $\times$ $opendef_{(opendef>=0.65)}$+  $\beta_{6}$ $\times$ $age_{(age<20)}$ + $\beta_{7}$ $\times$ $age_{(20>=age<26)}$ $\beta_{8}$ $\times$ $age_{(age>26)}$ + $\beta_{9}$ $\times$ $as.factor(windex5)$ + $all other confounding variables$
+
+*All other confounding includes the variables listed in figure 1.*
+
+
+### 1. Pattern of Association (Robustness)
+
+Looking at the pattern of association between my dependent variable, height for age z score, and my causal variable, open defecation, I decided to manipulate my causal variable in two ways. First, I decided to add a piecewise linear spline at the point where my graph's slope was changing to account for the two distinct patterns.Secondly, as the pattern of association graph had a slight upwards curve in the end, I decided to test with just adding a polynomial that is the square term of the causal variable. This would allow for more robustness check. 
+
+I decided to run four regressions. The first regression captures the impact of the confounding variables on the dependent variable. The second regression adds our causal variable with a piecewise spline. The third regression simply adds the causal variable as it is. In the fourth regressions the squared term of the causal variable is added. 
+
+### 2. R Square
+
+The adjusted R square and R square from all the models is slightly higher for the piecewise linear regression.
+
+
+### 3. Observing the regressions (Robustness)
+
+Please refer to Figure 6 for regression results
+With the piecewise linear regression I saw large standard errors for the observations above the knot that is more than 65 percentage points open defecation in a region. The positive association it had with height-for-age z score also rendered for more investigation. The investigation showed that there were very few observations for this segment. Whereas, this could have indicated that there are very few areas that have open defecation of more than 65 percentage points, but in this case it's not true. It's because 8 percentage points of the total population in Punjab practices open defecation, but our data set only has approximately 4.5 percentage points of households with 65 percentage points and more defecating openly. For another project, this segment could be explored to asses for why height for age z score is increasing in these areas or is it merely incorrect results. 
+
+From the quadratic regression we can see that beta 2 signals towards a convex relationship. This could be due to having very few observations for more than 65 percentage points of open defecation that is only 800 in a data set of 18500 observations. Hence, I decided to move forward with  piecewise linear spline in the regression as it seemed to appropriately capture the impact of open defecation, also with the highest R square. 
+
+### 4. Extra Testing: Keeping Wealth Index (Robustness)
+
+```{r, include=FALSE}
+reg5 <-  feols(HAZ2 ~ lspline(opendef,0.65) + handwash  + breastfed + lspline(cage,c(20,26))+
+               drinkingwater + siblings + hhsex + diarrhea + urban + as.factor(melevel)+
+               as.factor(helevel), data = chhd,vcov='hetero', ~ chweight)
+```
+
+
+As wealth index had a multicolinearity of 0.54 with our variable of interest that is open defecation, I wanted to further explore it. Wealth quintiles are extremely important in economic analysis but for robustness checks I had to investigate keeping them in this regression model, figure 7 in the appendix, shows that the highest R squared is for the model that has both open defecation and wealth quintiles. I decided to keep wealth quintiles as dropping them brought a one percentage points decrease in the fit of the model. Also, since they are highly statistically significant in explaining the variation in height for age z score, I made the decision of keeping them. 
+
+### 5. Using Weights in Regression Model (Robustness)
+```{r, include=FALSE}
+weight_with <- feols(HAZ2 ~ lspline(opendef,0.65) + handwash  + breastfed + lspline(cage,c(20,26)) + 
+                       drinkingwater + siblings + hhsex + diarrhea + urban + as.factor(melevel) +
+                       as.factor(helevel) + as.factor(windex5), data = chhd, vcov='hetero',  
+                       ~ chweight)
+
+weight_without <- feols(HAZ2 ~ lspline(opendef,0.65) + handwash  + breastfed +
+                        lspline(cage,c(20,26))+ drinkingwater + siblings + hhsex + diarrhea + urban +
+                        as.factor(melevel)+ as.factor(helevel) + as.factor(windex5), data = chhd,
+                        vcov='hetero')
+```
+
+My data set included child weights to give equal representation to children belonging from primary sampling units with lower probability of response rates. I decided to do an analysis with and without weights with the above selected model (appendix:figure 8). The result showed that keeping weights had both adjusted R2 and R2 to have a slightly higher value than the other. Hence, I decided to move forward with keeping the weighted regression. This also added to the robustness of my model. 
+
+
+## Interpretation
+
+The interpretation for our final regression model, figure 9 in appendix, will be based on our causal variable, open defecation. Among household observations with open defecation impact of less than 65 percentage points (0.65), height for age z score, on average, is -0.18 standard deviations lower for households with 10 percentage points (0.1) higher open defecation, ceteris paribus. We can observe from this regression that both the education levels especially for mothers is highly statistically significant. Holding all else constant, if a mother has recieved higher education(melevel4), height for age z score, on average, is 0.66 standard deviations higher than a mother who has not attended school at all (illetrate).Another very important variable is diarrhea which is highly statistically significant. Holding all else constant, for children who had suffered from diarhhea in the past two weeks (of when the survey was conducted), height for age z score, on avergae, was 0.16 standard deviations lower than a child who had not. Whether a mother had breastfed her child also held significance with 95 percentage confidence interval. A child who had ever been breastfed by the mother had height for age z score, on average, 0.01 standard deviations higher than a child who had not. 
+
+The regression output shows the t value for both piecewise linear splines is negative 2.4 and postive 2.5 respectively. Hence we can state that at a level of significance equal to 0.05 we reject the null hypothesis. With a 95% confidence level we conclude that open defecation has a significant difference on height-for-age z score. 
+
+### External Validity:
+
+From our statistical inference, we established that the patterns are very likely present in the population represented by the data: impact of open defecation on children (under the age of five) height for age z score. Multiple Cluster Survey is a good starting point in terms of its representation of the entire Province as well as a good basis for policy planning for other provinces in Pakistan. We can use data from previous years when MICS was conducted to further test for external validity. If the results are close, it might be informative about future patterns. 
+
+
+### Causal Interpretation:
+
+After using all our statistical tools, open defecation indicate towards a causal relationship with height for age z score but it is difficult to establish it with the length of research conducted. I tried adding as many confounding variables as I could given the limitations of the data set, but I feel that many more important confounding variables are required to establish a causal relationship. Maybe, using data from other countries where the response rate is much higher could be a good starting point. 
+
+## Conclusion: 
+
+For policy makers wishing to improve the height outcomes of children in Punjab, it is crucial that they institute programs focused on reducing the rates of open defecation alongside improving the economic well-being and literacy levels. Necessary teaching of hygiene practices as part of the education curriculum should be mandated to create awareness amongst children even if households lack information. It will provide them the basic knowledge regarding the usage of installed latrine systems and maintaining them. Education also has a direct impact on increased earnings which can result in investment towards better sanitation facilities. The early years of a child’s growth are crucial in determining their nutritional strength and preventing stunting. A child's required nourishment is not fulfilled if a mother, birthing at a less than two years interval, tends to shift to early weaning. Pakistan requires effective family planning programs that educate household heads on the impediment to their future welfare due to a large family size.  Cultural stereotypes need to be addressed especially in rural areas. These are some of the recommendations based on my findings. Lack of sanitation facilities in Punjab should be looked over, especially for the health of children.
+
+\newpage
+
+## Appendix
+
+*Fig 1: Variable Description*
+
+```{r, echo=FALSE, warning=FALSE, fig.width=5, fig.height = 7, fig.align="center"}
+app_table <- read.csv('https://raw.githubusercontent.com/MahrukhKhan/DA2_Final_Project/main/data/DA2_Project.csv')
+      
+app_table %>%
+  kbl() %>%
+  kable_paper(full_width = F) %>% 
+  kable_styling(latex_options = c("hold_position", "scale_down"))
+```
+
+\newpage
+
+*Fig 2a: Data Summary*
+
+```{r, echo=FALSE, warning=FALSE, fig.width=7, fig.height = 7, fig.align="center"}
+data_sum
+
+```
+\newpage
+
+*Fig 2b: Distribution Histograms - Binary*
+
+```{r, echo=FALSE, warning=FALSE, fig.width=7, fig.height = 7, fig.align="center"}
+
+binary_var
+```
+\newpage
+*Fig 2c: Distribution Histograms - Continuous*
+
+```{r, echo=FALSE, warning=FALSE, fig.width=7, fig.height = 7, fig.align="center"}
+continuous_var
+```
+
+
+
+\newpage
+
+*Fig 3: Patterns of Association*
+
+```{r, echo=FALSE, warning=FALSE, message= FALSE, fig.width=6, fig.height =7, fig.align="center"}
+grid.arrange(g1,g2,g3,g4,g5, top = "Patterns of Association", ncol = 2)
+```
+
+\newpage
+
+*Fig 4: Correlation Plot*
+
+```{r, echo=FALSE, warning=FALSE, fig.width=5, fig.height = 7, fig.align="center"}
+cor_data <- chhd[, colnames(chhd)[c(4:16)]]
+M = cor(cor_data)
+cor_plot <- corrplot(M, method = 'shade', type = 'lower')
+```
+
+\newpage
+
+*Fig 5: Explanatory Variables Regression*
+
+```{r, echo=FALSE}
+regx
+
+```
+
+\newpage
+
+*Fig 6: Regression Results*
+
+```{r, echo=FALSE, warning=FALSE, fig.width=7}
+kable(etable(reg1,reg2,reg3,reg4)) %>% 
+  kable_styling(latex_options = c("hold_position", "scale_down"))
+```
+
+\newpage
+
+*Fig 7: Multicolinearity Testing Regression Results *
+
+```{r, echo=FALSE, warning=FALSE}
+kable(etable(reg1,reg5,reg2)) %>% 
+  kable_styling(latex_options = c("hold_position", "scale_down"))
+
+```
+
+\newpage
+
+*Fig 8: Weighted Analysis*
+```{r, echo=FALSE, warning=FALSE}
+kable(etable(weight_with, weight_without)) %>% 
+  kable_styling(latex_options = c("hold_position", "scale_down"))
+```
+
+\newpage
+
+*Fig 9: Final Regression Model*
+```{r, echo=FALSE}
+reg2
+```
