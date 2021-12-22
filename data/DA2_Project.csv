@@ -1,0 +1,26 @@
+﻿Variable ,Definition 
+Height-for-Age z-score (HAZ) ,"Measures the height of the child as a number of standard deviations below or above the mean value of a reference population, according to WHO standards. "
+Open Defecation (open_defecation) ,"A fraction of the number of households in the PSU that defecate openly and the total number of households in that PSU, assigned to each household within that PSU. "
+Breastfeed (breastfed),Takes the value of one if the child was ever breastfed.  
+Child Age (cage) ,"A variable that assumes a value between 6-60 months, depicting the age of the child. All observations for children below 6 months of age were dropped owing to dietary variations and their impact on child growth. "
+Diarrhea in Last 2 Weeks (diarrhea) ,A variable that takes a value of one if the child has had diarrhea in the last two weeks. 
+Head of Household (hhsex),Takes the value of one if the household head is a male. 
+Household Head Education - None/Preschool (helevel 0) ,Takes the value of one if the household head is illiterate or has received preschool education at most. 
+Household Head Education - Primary (helevel 1)  ,Takes the value of one if the household head has received primary education at most.
+Household Head Education – Secondary (helevel 2) ,Takes the value of one if the household head has received secondary education at most.
+Household Head Education – Middle (helevel 3) ,Takes the value of one if the household head has received middle school education at most.
+Household Head Education – Higher (helevel 4) ,Takes the value of one if the household head has received higher education.
+Mother’s Education - None/Preschool (me_illiterate),Takes the value of one if the mother is illiterate or has received preschool education at most.
+Mother’s Education - Primary (me_primary)  ,Takes the value of one if the mother has received primary education at most.
+Mother’s Education – Higher (me_higher),Takes the value of one if the mother has received higher education. 
+Mother’s Education – Middle (me_middle),Takes the value of one if the mother has received middle school education at most.
+Mother’s Education – Secondary (me_secondary),Takes the value of one if the mother has received secondary education at most.
+Drinking Water,Takes the value of one if the household has a facility for drinking water
+Handwash (handwash),Take the value of one if the household has a handwashing facility with running water
+Siblings (siblings) ,Number of siblings that the child has who are also between the ages of 6-60 months. 
+Urban (urban) ,Takes the value of one if child resides in an Urban area and zero if rural. 
+Wealth Quintile 1 (wealth_q1) ,Takes a value of one if the child lives in a household that belongs to the poorest 20% of the population.  
+Wealth Quintile 2 (wealth_q2),Takes a value of one if the child lives in a household that belongs to the second poorest 20% of the population.  
+Wealth Quintile 3 (wealth_q3),Takes a value of one if the child lives in a household that belongs to the middle 20% of the population.  
+Wealth Quintile 4 (wealth_q4),Takes a value of one if the child lives in a household that belongs to the second richest 20% of the population.  
+Wealth Quintile 5 (wealth_q5),Takes a value of one if the child lives in a household that belongs to the richest 20% of the population.  
